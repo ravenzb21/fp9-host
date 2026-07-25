@@ -450,17 +450,18 @@ app.post('/api/bots/:id/restart', (req, res) => {
   }, 1000);
 });
 
-app.put('/api/bots/:id/files/:filePath(*)', (req, res) => {
+app.put('/api/bots/:id/files/*filePath', (req, res) => {
   const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(req.params.id);
   if (!bot) return res.status(404).json({ error: 'Bot not found' });
 
-  const filePath = path.join(BOTS_DIR, bot.id, req.params.filePath);
-  if (!filePath.startsWith(path.join(BOTS_DIR, bot.id))) {
+  const filePath = req.params.filePath;
+  const fullPath = path.join(BOTS_DIR, bot.id, filePath);
+  if (!fullPath.startsWith(path.join(BOTS_DIR, bot.id))) {
     return res.status(400).json({ error: 'Invalid path' });
   }
 
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, req.body.content || '', 'utf-8');
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, req.body.content || '', 'utf-8');
   res.json({ success: true });
 });
 
