@@ -167,14 +167,20 @@ function installDeps(botPath, language) {
     if (language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
       cmd = 'npm'; args = ['install', '--omit=dev'];
     } else if (language === 'python' && fs.existsSync(path.join(botPath, 'requirements.txt'))) {
-      cmd = 'pip'; args = ['install', '-r', 'requirements.txt'];
-    } else { return resolve(); }
+      cmd = 'pip3'; args = ['install', '-r', 'requirements.txt'];
+    } else { return resolve('No deps to install'); }
     const proc = spawn(cmd, args, { cwd: botPath, shell: true });
     let output = '';
     proc.stdout.on('data', d => output += d.toString());
     proc.stderr.on('data', d => output += d.toString());
-    proc.on('close', () => resolve(output));
-    proc.on('error', () => resolve(''));
+    proc.on('close', (code) => {
+      if (code !== 0) console.log(`Install failed for ${botPath}: ${output}`);
+      resolve(output);
+    });
+    proc.on('error', (err) => {
+      console.log(`Install error for ${botPath}: ${err.message}`);
+      resolve(err.message);
+    });
   });
 }
 
@@ -375,10 +381,18 @@ app.get('/api/bots', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/bots/:id/start', (req, res) => {
+app.post('/api/bots/:id/start', async (req, res) => {
   const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(req.params.id);
   if (!bot) return res.status(404).json({ error: 'Bot not found' });
   if (botProcesses.has(bot.id)) return res.status(400).json({ error: 'Bot is already running' });
+
+  const botPath = path.join(BOTS_DIR, bot.id);
+  if (bot.language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
+    addConsoleLog(bot.id, 'system', 'Installing dependencies...');
+    await installDeps(botPath, bot.language);
+    addConsoleLog(bot.id, 'system', 'Dependencies ready');
+  }
+
   const success = startBotProcess(bot);
   if (success) res.json({ status: 'running' });
   else res.status(500).json({ error: 'Failed to start bot' });
