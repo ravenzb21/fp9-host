@@ -55,6 +55,9 @@ export default function BotDetail({ bot, onBack, onUpdate }: BotDetailProps) {
       if (msg.type === 'console' && msg.data) {
         setConsoleLines(prev => [...prev.slice(-500), { ...msg.data, id: ++consoleIdRef.current }]);
       }
+      if (msg.type === 'clear') {
+        setConsoleLines([]);
+      }
       if (msg.type === 'status') {
         onUpdate({ ...bot, status: msg.status });
       }
@@ -384,11 +387,10 @@ export default function BotDetail({ bot, onBack, onUpdate }: BotDetailProps) {
               <div className="flex items-center flex-1 bg-gray-900 rounded-xl px-4 py-3 font-mono text-sm">
                 <span className="text-discord-blurple mr-2">$</span>
                 <input type="text" value={consoleInput} onChange={(e) => setConsoleInput(e.target.value)}
-                  className="flex-1 bg-transparent text-white outline-none" placeholder="Type input..." disabled={bot.status !== 'running'} />
+                  className="flex-1 bg-transparent text-white outline-none" placeholder="Type a command..." />
               </div>
-              <button type="submit" className="btn-primary px-4" disabled={bot.status !== 'running'}><Send className="w-4 h-4" /></button>
+              <button type="submit" className="btn-primary px-4"><Send className="w-4 h-4" /></button>
             </form>
-            {bot.status !== 'running' && <p className="text-xs text-gray-500 mt-2 text-center">Start the bot to use the console</p>}
           </div>
         )}
 

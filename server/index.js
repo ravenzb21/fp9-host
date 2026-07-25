@@ -1,12 +1,11 @@
 const express = require('express');
-const multer = require('multer');
 const JSZip = require('jszip');
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -34,8 +33,6 @@ db.exec(`
   );
 `);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -58,24 +55,18 @@ app.post('/api/auth/discord', async (req, res) => {
   try {
     const { code, redirectUri } = req.body;
     if (!code) return res.status(400).json({ error: 'Code is required' });
-
     const clientId = process.env.DISCORD_CLIENT_ID || '1530409781045493882';
     const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-
     if (!clientSecret) return res.status(500).json({ error: 'Discord credentials not configured' });
 
     const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
+        client_id: clientId, client_secret: clientSecret,
+        grant_type: 'authorization_code', code, redirect_uri: redirectUri,
       }),
     });
-
     const tokenData = await tokenRes.json();
     if (tokenData.error) return res.status(400).json({ error: tokenData.error_description || tokenData.error });
 
@@ -83,7 +74,6 @@ app.post('/api/auth/discord', async (req, res) => {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const userData = await userRes.json();
-
     res.json({ access_token: tokenData.access_token, user: userData });
   } catch (err) {
     res.status(500).json({ error: 'Auth failed' });
@@ -103,6 +93,24 @@ function addConsoleLog(botId, type, text) {
     if (client.readyState === 1 && client.botId === botId) {
       client.send(JSON.stringify({ type: 'console', botId, data: { id: Date.now(), type, text, timestamp: new Date().toLocaleTimeString() } }));
     }
+  });
+}
+
+function runShellCommand(command, cwd) {
+  return new Promise((resolve) => {
+    const proc = spawn(command, { cwd, shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', d => {
+      const lines = d.toString().split('\n').filter(Boolean);
+      lines.forEach(line => stdout += line + '\n');
+    });
+    proc.stderr.on('data', d => {
+      const lines = d.toString().split('\n').filter(Boolean);
+      lines.forEach(line => stderr += line + '\n');
+    });
+    proc.on('close', (code) => resolve({ stdout, stderr, code }));
+    proc.on('error', (err) => resolve({ stdout: '', stderr: err.message, code: 1 }));
   });
 }
 
@@ -161,29 +169,6 @@ function flattenFiles(files) {
   return result;
 }
 
-function installDeps(botPath, language) {
-  return new Promise((resolve, reject) => {
-    let cmd, args;
-    if (language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
-      cmd = 'npm'; args = ['install', '--omit=dev'];
-    } else if (language === 'python' && fs.existsSync(path.join(botPath, 'requirements.txt'))) {
-      cmd = 'pip3'; args = ['install', '-r', 'requirements.txt'];
-    } else { return resolve('No deps to install'); }
-    const proc = spawn(cmd, args, { cwd: botPath, shell: true });
-    let output = '';
-    proc.stdout.on('data', d => output += d.toString());
-    proc.stderr.on('data', d => output += d.toString());
-    proc.on('close', (code) => {
-      if (code !== 0) console.log(`Install failed for ${botPath}: ${output}`);
-      resolve(output);
-    });
-    proc.on('error', (err) => {
-      console.log(`Install error for ${botPath}: ${err.message}`);
-      resolve(err.message);
-    });
-  });
-}
-
 function startBotProcess(bot) {
   const botPath = path.join(BOTS_DIR, bot.id);
   if (!fs.existsSync(botPath)) return false;
@@ -204,11 +189,11 @@ function startBotProcess(bot) {
 
   let cmd, args;
   if (language === 'nodejs') {
-    const mainFile = ['index.js', 'bot.js', 'main.js'].find(f => fs.existsSync(path.join(botPath, f))) || 'index.js';
+    const mainFile = ['index.js', 'bot.js', 'main.js', 'app.js'].find(f => fs.existsSync(path.join(botPath, f))) || 'index.js';
     cmd = 'node'; args = [mainFile];
   } else if (language === 'python') {
     const mainFile = ['main.py', 'bot.py', 'app.py'].find(f => fs.existsSync(path.join(botPath, f))) || 'main.py';
-    cmd = 'python'; args = [mainFile];
+    cmd = 'python3'; args = [mainFile];
   } else { return false; }
 
   const proc = spawn(cmd, args, { cwd: botPath, env, shell: true });
@@ -258,26 +243,104 @@ function stopBotProcess(botId) {
 }
 
 wss.on('connection', (ws) => {
-  ws.on('message', (data) => {
+  ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
+
       if (msg.type === 'subscribe') {
         ws.botId = msg.botId;
         (consoleBuffers.get(msg.botId) || []).forEach(log => {
           ws.send(JSON.stringify({ type: 'console', botId: msg.botId, data: log }));
         });
       }
+
       if (msg.type === 'input') {
-        const proc = botProcesses.get(msg.botId);
+        const botId = msg.botId;
+        const text = msg.text.trim();
+        if (!text) return;
+
+        const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(botId);
+        const botPath = path.join(BOTS_DIR, botId);
+
+        const proc = botProcesses.get(botId);
         if (proc && proc.stdin && !proc.stdin.destroyed) {
-          proc.stdin.write(msg.text + '\n');
-          addConsoleLog(msg.botId, 'input', msg.text);
+          proc.stdin.write(text + '\n');
+          addConsoleLog(botId, 'input', text);
+          return;
         }
+
+        addConsoleLog(botId, 'input', `$ ${text}`);
+
+        if (text === 'clear') {
+          if (consoleBuffers.has(botId)) consoleBuffers.set(botId, []);
+          ws.send(JSON.stringify({ type: 'clear', botId }));
+          return;
+        }
+
+        if (text === 'help') {
+          addConsoleLog(botId, 'system', 'Commands: help, clear, ls, cat <file>, npm install, npm install <pkg>, pip install <pkg>, node <file>, python <file>, start, stop');
+          return;
+        }
+
+        if (text === 'start') {
+          if (proc) { addConsoleLog(botId, 'error', 'Bot is already running'); return; }
+          if (!bot) { addConsoleLog(botId, 'error', 'Bot not found'); return; }
+          const ok = startBotProcess(bot);
+          if (!ok) addConsoleLog(botId, 'error', 'Failed to start bot');
+          return;
+        }
+
+        if (text === 'stop') {
+          if (!proc) { addConsoleLog(botId, 'error', 'Bot is not running'); return; }
+          stopBotProcess(botId);
+          addConsoleLog(botId, 'system', 'Bot stopped');
+          return;
+        }
+
+        if (text === 'ls' || text === 'dir') {
+          if (!fs.existsSync(botPath)) { addConsoleLog(botId, 'error', 'Bot directory not found'); return; }
+          const entries = fs.readdirSync(botPath, { withFileTypes: true });
+          const list = entries.map(e => e.isDirectory() ? `[DIR]  ${e.name}` : `       ${e.name}`).join('\n');
+          addConsoleLog(botId, 'output', list || 'Empty directory');
+          return;
+        }
+
+        if (text.startsWith('cat ')) {
+          const fileName = text.slice(4).trim();
+          const filePath = path.join(botPath, fileName);
+          if (!fs.existsSync(filePath)) { addConsoleLog(botId, 'error', `File not found: ${fileName}`); return; }
+          const content = fs.readFileSync(filePath, 'utf-8');
+          content.split('\n').forEach(line => addConsoleLog(botId, 'output', line));
+          return;
+        }
+
+        if (text.startsWith('npm ') || text.startsWith('pip ') || text.startsWith('pip3 ') || text.startsWith('yarn ') || text.startsWith('pnpm ')) {
+          addConsoleLog(botId, 'system', `Running: ${text}...`);
+          const result = await runShellCommand(text, botPath);
+          if (result.stdout) result.stdout.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'output', line));
+          if (result.stderr) result.stderr.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'error', line));
+          addConsoleLog(botId, 'system', result.code === 0 ? 'Command completed successfully' : `Command failed (exit code: ${result.code})`);
+          return;
+        }
+
+        if (text.startsWith('node ') || text.startsWith('python ') || text.startsWith('python3 ')) {
+          addConsoleLog(botId, 'system', `Running: ${text}...`);
+          const result = await runShellCommand(text, botPath);
+          if (result.stdout) result.stdout.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'output', line));
+          if (result.stderr) result.stderr.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'error', line));
+          addConsoleLog(botId, 'system', result.code === 0 ? 'Command completed' : `Command failed (exit code: ${result.code})`);
+          return;
+        }
+
+        addConsoleLog(botId, 'error', `Unknown command: ${text}. Type "help" for available commands.`);
       }
-    } catch {}
+    } catch (err) {
+      console.error('WebSocket error:', err);
+    }
   });
 });
 
+const upload = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 const uploadSingle = upload.single('file');
 
 app.post('/api/upload', (req, res) => {
@@ -320,10 +383,14 @@ app.post('/api/upload', (req, res) => {
         botId, req.body.name || req.file.originalname.replace('.zip', ''), language, 'stopped'
       );
 
+      addConsoleLog(botId, 'system', 'Bot uploaded successfully');
+      addConsoleLog(botId, 'system', `Language: ${language} | Files: ${flatNames.length}`);
       if (language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
         addConsoleLog(botId, 'system', 'Installing dependencies...');
-        await installDeps(botPath, language);
-        addConsoleLog(botId, 'system', 'Dependencies installed');
+        const result = await runShellCommand('npm install --omit=dev', botPath);
+        if (result.stdout) result.stdout.split('\n').filter(Boolean).slice(-5).forEach(line => addConsoleLog(botId, 'output', line));
+        if (result.stderr) result.stderr.split('\n').filter(Boolean).slice(-5).forEach(line => addConsoleLog(botId, 'error', line));
+        addConsoleLog(botId, 'system', result.code === 0 ? 'Dependencies installed successfully' : 'Dependencies install failed - run "npm install" in console');
       }
 
       res.json({
@@ -387,9 +454,9 @@ app.post('/api/bots/:id/start', async (req, res) => {
   if (botProcesses.has(bot.id)) return res.status(400).json({ error: 'Bot is already running' });
 
   const botPath = path.join(BOTS_DIR, bot.id);
-  if (bot.language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
-    addConsoleLog(bot.id, 'system', 'Installing dependencies...');
-    await installDeps(botPath, bot.language);
+  if (bot.language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json')) && !fs.existsSync(path.join(botPath, 'node_modules'))) {
+    addConsoleLog(bot.id, 'system', 'node_modules not found. Installing dependencies...');
+    await runShellCommand('npm install --omit=dev', botPath);
     addConsoleLog(bot.id, 'system', 'Dependencies ready');
   }
 
