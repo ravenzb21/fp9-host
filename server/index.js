@@ -270,6 +270,18 @@ app.post('/api/upload', (req, res) => {
       const botId = `bot-${Date.now()}`;
       const dir = getBotDir(botId);
       fs.mkdirSync(dir, { recursive: true });
+
+      // Collect all file entries to detect common top-level dir
+      const allEntries = [];
+      zip.forEach((name, entry) => { if (!entry.dir) allEntries.push(name); });
+      // Find common prefix (e.g., "bot-folder/package.json" → prefix = "bot-folder")
+      let prefix = '';
+      if (allEntries.length > 0) {
+        const first = allEntries[0].split('/')[0];
+        const allSame = allEntries.every(e => e.split('/')[0] === first);
+        if (allSame && first) prefix = first + '/';
+      }
+
       const fileNames = [];
       const tasks = [];
       zip.forEach((name, entry) => {
@@ -280,10 +292,12 @@ app.post('/api/upload', (req, res) => {
           if (TEXT_EXTS.has(ext) || ['Dockerfile', 'Procfile', '.env'].includes(base)) {
             try {
               const text = await entry.async('text');
-              const out = path.join(dir, name);
+              // Strip common prefix so files end up at root
+              const targetName = prefix ? name.slice(prefix.length) : name;
+              const out = path.join(dir, targetName);
               fs.mkdirSync(path.dirname(out), { recursive: true });
               fs.writeFileSync(out, text, 'utf-8');
-              fileNames.push(name);
+              fileNames.push(targetName);
             } catch {}
           }
         })());
