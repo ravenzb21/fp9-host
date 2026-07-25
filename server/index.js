@@ -249,33 +249,34 @@ function broadcastStatus(botId, status) {
 
 function readBotFiles(botPath) {
   if (!fs.existsSync(botPath)) return [];
-  const result = [];
   const visited = new Set();
   const MAX_DEPTH = 30;
-  function walk(dir, prefix, depth) {
+  function walk(dir, depth) {
     if (depth > MAX_DEPTH) return [];
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+    const result = [];
     for (const entry of entries) {
       const full = path.resolve(path.join(dir, entry.name));
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink() || entry.name.startsWith('.') || entry.name === 'node_modules') continue;
       if (visited.has(full)) continue;
       visited.add(full);
+      const name = entry.name;
+      const rel = path.relative(botPath, full).replace(/\\/g, '/');
       if (entry.isDirectory()) {
-        result.push({ name: entry.name, path: rel, content: '', isDirectory: true, children: walk(full, rel, depth + 1) });
+        result.push({ name, path: rel, content: '', isDirectory: true, children: walk(full, depth + 1) });
       } else {
         let content = '';
         try {
-          const ext = entry.name.split('.').pop()?.toLowerCase() || '';
+          const ext = name.split('.').pop()?.toLowerCase() || '';
           if (TEXT_EXTENSIONS.has(ext)) content = fs.readFileSync(full, 'utf-8');
         } catch {}
-        result.push({ name: entry.name, path: rel, content, isDirectory: false });
+        result.push({ name, path: rel, content, isDirectory: false });
       }
     }
     return result;
   }
-  return walk(botPath, '', 0);
+  return walk(botPath, 0);
 }
 
 function verifyModule(botPath, modName) {
