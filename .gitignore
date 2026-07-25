@@ -2,8 +2,11 @@ node_modules/
 .next/
 out/
 data/*.db
+data/*
+!data/.gitkeep
+bots/*
+!bots/.gitkeep
 .env.local
 .env.production
 *.log
 .DS_Store
-bots/
