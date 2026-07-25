@@ -83,10 +83,10 @@ export async function restartBot(id: string) {
 }
 
 export async function saveFile(botId: string, filePath: string, content: string) {
-  const res = await fetch(`${API_URL}/api/bots/${botId}/files/${encodeURIComponent(filePath)}`, {
+  const res = await fetch(`${API_URL}/api/bots/${botId}/files`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ filePath, content }),
   });
   if (!res.ok) throw new Error('Failed to save file');
   return res.json();
