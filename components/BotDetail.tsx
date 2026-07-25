@@ -1,12 +1,13 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Play, Square, RotateCcw, Save, Plus, Trash2, Terminal, Folder, Cpu, MemoryStick, Clock, Eye, ChevronRight, ChevronDown, Send, Copy, Package, CheckCircle2, AlertCircle, SaveIcon } from 'lucide-react';
-import { Bot, BotFile, LogLine, fileIcon } from '@/lib/data';
+import { ArrowLeft, Play, Square, RotateCcw, Save, Plus, Trash2, Terminal, Folder, Cpu, MemoryStick, Clock, Eye, ChevronRight, ChevronDown, Send, Copy, Package, CheckCircle2, AlertCircle, SaveIcon, Puzzle, Search, Download } from 'lucide-react';
+import { Bot, BotFile, LogLine, fileIcon, PLUGINS } from '@/lib/data';
 import { startBot, stopBot, restartBot, saveFile, onMsg, sendCmd, deleteBot } from '@/lib/api';
 
 const TABS = [
   { id: 'overview', icon: Eye, label: 'Overview' }, { id: 'files', icon: Folder, label: 'Files' },
-  { id: 'console', icon: Terminal, label: 'Console' }, { id: 'settings', icon: Package, label: 'Settings' },
+  { id: 'console', icon: Terminal, label: 'Console' }, { id: 'plugins', icon: Puzzle, label: 'Plugins' },
+  { id: 'settings', icon: Package, label: 'Settings' },
 ];
 
 export default function BotDetail({ bot, onBack, onUpdate }: { bot: Bot; onBack: () => void; onUpdate: (b: Bot) => void }) {
@@ -20,6 +21,31 @@ export default function BotDetail({ bot, onBack, onUpdate }: { bot: Bot; onBack:
   const [env, setEnv] = useState<{ key: string; value: string }[]>([]);
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pluginSearch, setPluginSearch] = useState('');
+  const [pluginCat, setPluginCat] = useState('all');
+  const [installing, setInstalling] = useState<string | null>(null);
+  const categories = [
+    { id: 'all', name: 'All', icon: '📦' }, { id: 'media', name: 'Media', icon: '🎬' },
+    { id: 'database', name: 'Database', icon: '💾' }, { id: 'api', name: 'API', icon: '🌐' },
+    { id: 'ai', name: 'AI', icon: '🤖' }, { id: 'utility', name: 'Utility', icon: '🔧' },
+  ];
+  const installed = bot.plugins || [];
+  const filtered = PLUGINS.filter(p => {
+    const m = p.name.toLowerCase().includes(pluginSearch.toLowerCase()) || p.description.toLowerCase().includes(pluginSearch.toLowerCase());
+    const c = pluginCat === 'all' || p.category === pluginCat;
+    return m && c;
+  });
+  const togglePlugin = (id: string) => {
+    const plugin = PLUGINS.find(p => p.id === id);
+    if (!plugin) return;
+    setInstalling(id);
+    setTimeout(() => {
+      const isInst = installed.some((p: any) => p.id === id);
+      const next = isInst ? installed.filter((p: any) => p.id !== id) : [...installed, { ...plugin, installed: true }];
+      onUpdate({ ...bot, plugins: next });
+      setInstalling(null);
+    }, 1200);
+  };
   const consoleRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
 
@@ -213,6 +239,72 @@ export default function BotDetail({ bot, onBack, onUpdate }: { bot: Bot; onBack:
               </div>
               <button type="submit" className="btn-primary px-4"><Send className="w-4 h-4" /></button>
             </form>
+          </div>
+        )}
+
+        {tab === 'plugins' && (
+          <div className="space-y-6 animate-in">
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="text" value={pluginSearch} onChange={e => setPluginSearch(e.target.value)} className="input pl-10" placeholder="Search plugins..." />
+              </div>
+              <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+                {categories.map(c => (
+                  <button key={c.id} onClick={() => setPluginCat(c.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${pluginCat === c.id ? 'bg-white dark:bg-gray-700 shadow text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+                    {c.icon} {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {installed.length > 0 && (
+              <div>
+                <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Installed ({installed.length})</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {installed.map(p => (
+                    <div key={p.id} className="card border-green-500/20 bg-green-500/5">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">{p.icon}</span>
+                          <div><h4 className="font-bold">{p.name}</h4><span className="text-xs text-gray-500">{p.size}</span></div>
+                        </div>
+                        <span className="badge-green">Installed</span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{p.description}</p>
+                      <button onClick={() => togglePlugin(p.id)} disabled={installing === p.id}
+                        className="btn-danger text-xs w-full justify-center">{installing === p.id ? 'Processing...' : 'Uninstall'}</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Available ({filtered.length})</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filtered.filter(p => !installed.some(ip => ip.id === p.id)).map(p => (
+                  <div key={p.id} className="card hover:scale-[1.01] transition-all">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{p.icon}</span>
+                        <div><h4 className="font-bold">{p.name}</h4>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{p.size}</span>
+                            <span className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded capitalize">{p.category}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{p.description}</p>
+                    <button onClick={() => togglePlugin(p.id)} disabled={installing === p.id}
+                      className="btn-primary text-xs w-full justify-center">{installing === p.id ? <><Download className="w-3.5 h-3.5 animate-bounce" /> Installing...</> : <><Download className="w-3.5 h-3.5" /> Install</>}</button>
+                  </div>
+                ))}
+                {filtered.length === 0 && <p className="col-span-full text-center text-gray-500 py-8">No plugins match your search</p>}
+              </div>
+            </div>
           </div>
         )}
 
