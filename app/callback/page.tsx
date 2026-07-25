@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 export default function CallbackPage() {
   const router = useRouter();
   const [error, setError] = useState('');
@@ -25,8 +27,8 @@ export default function CallbackPage() {
     const exchangeCode = async () => {
       try {
         const redirectUri = `${window.location.origin}/callback`;
-        
-        const res = await fetch('/.netlify/functions/exchange-token', {
+
+        const res = await fetch(`${API_URL}/api/auth/discord`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, redirectUri }),

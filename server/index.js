@@ -54,6 +54,42 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+app.post('/api/auth/discord', async (req, res) => {
+  try {
+    const { code, redirectUri } = req.body;
+    if (!code) return res.status(400).json({ error: 'Code is required' });
+
+    const clientId = process.env.DISCORD_CLIENT_ID || '1530409781045493882';
+    const clientSecret = process.env.DISCORD_CLIENT_SECRET;
+
+    if (!clientSecret) return res.status(500).json({ error: 'Discord credentials not configured' });
+
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) return res.status(400).json({ error: tokenData.error_description || tokenData.error });
+
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const userData = await userRes.json();
+
+    res.json({ access_token: tokenData.access_token, user: userData });
+  } catch (err) {
+    res.status(500).json({ error: 'Auth failed' });
+  }
+});
+
 const botProcesses = new Map();
 const consoleBuffers = new Map();
 
