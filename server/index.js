@@ -201,20 +201,20 @@ function startProc(bot) {
   const cmd = isNode ? 'node' : 'python3';
   const proc = require('child_process').spawn(cmd, [main], { cwd: dir, env, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
   botProcs.set(bot.id, proc);
-  db.prepare('UPDATE bots SET status = ?, updated_at = datetime("now") WHERE id = ?').run('running', bot.id);
+  db.prepare("UPDATE bots SET status = ?, updated_at = datetime('now') WHERE id = ?").run('running', bot.id);
   log(bot.id, 'system', `Started (${bot.language}: ${main})`);
   broadcast(bot.id, { type: 'status', status: 'running' });
   proc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => log(bot.id, 'output', l)));
   proc.stderr.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => log(bot.id, 'error', l)));
   proc.on('close', code => {
     botProcs.delete(bot.id);
-    db.prepare('UPDATE bots SET status = ?, updated_at = datetime("now") WHERE id = ?').run('stopped', bot.id);
+    db.prepare("UPDATE bots SET status = ?, updated_at = datetime('now') WHERE id = ?").run('stopped', bot.id);
     log(bot.id, 'system', `Stopped (exit: ${code})`);
     broadcast(bot.id, { type: 'status', status: 'stopped' });
   });
   proc.on('error', err => {
     botProcs.delete(bot.id);
-    db.prepare('UPDATE bots SET status = ?, updated_at = datetime("now") WHERE id = ?').run('error', bot.id);
+    db.prepare("UPDATE bots SET status = ?, updated_at = datetime('now') WHERE id = ?").run('error', bot.id);
     log(bot.id, 'error', `Error: ${err.message}`);
     broadcast(bot.id, { type: 'status', status: 'error' });
   });
@@ -401,7 +401,7 @@ app.put('/api/bots/:id/files', (req, res) => {
     const dir = path.dirname(full);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(full, String(req.body.content || ''), 'utf-8');
-    db.prepare('UPDATE bots SET updated_at = datetime("now") WHERE id = ?').run(bot.id);
+    db.prepare("UPDATE bots SET updated_at = datetime('now') WHERE id = ?").run(bot.id);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
