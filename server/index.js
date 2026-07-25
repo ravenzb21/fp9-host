@@ -5,7 +5,7 @@ const fs = require('fs');
 const Database = require('better-sqlite3');
 const { WebSocketServer } = require('ws');
 const http = require('http');
-const { spawn, exec } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -96,19 +96,17 @@ function addConsoleLog(botId, type, text) {
   });
 }
 
-function runShellCommand(command, cwd) {
+function runShell(command, cwd) {
   return new Promise((resolve) => {
-    const proc = spawn(command, { cwd, shell: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn('bash', ['-c', command], {
+      cwd,
+      env: { ...process.env, PATH: process.env.PATH },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', d => {
-      const lines = d.toString().split('\n').filter(Boolean);
-      lines.forEach(line => stdout += line + '\n');
-    });
-    proc.stderr.on('data', d => {
-      const lines = d.toString().split('\n').filter(Boolean);
-      lines.forEach(line => stderr += line + '\n');
-    });
+    proc.stdout.on('data', d => { stdout += d.toString(); });
+    proc.stderr.on('data', d => { stderr += d.toString(); });
     proc.on('close', (code) => resolve({ stdout, stderr, code }));
     proc.on('error', (err) => resolve({ stdout: '', stderr: err.message, code: 1 }));
   });
@@ -185,7 +183,7 @@ function startBotProcess(bot) {
       }
     });
   }
-  const env = { ...process.env, ...envVars };
+  const env = { ...process.env, ...envVars, HOME: '/tmp' };
 
   let cmd, args;
   if (language === 'nodejs') {
@@ -196,7 +194,7 @@ function startBotProcess(bot) {
     cmd = 'python3'; args = [mainFile];
   } else { return false; }
 
-  const proc = spawn(cmd, args, { cwd: botPath, env, shell: true });
+  const proc = spawn(cmd, args, { cwd: botPath, env, shell: false });
   botProcesses.set(bot.id, proc);
   db.prepare('UPDATE bots SET status = ? WHERE id = ?').run('running', bot.id);
   addConsoleLog(bot.id, 'system', `Bot started (${language}: ${args.join(' ')})`);
@@ -262,13 +260,6 @@ wss.on('connection', (ws) => {
         const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(botId);
         const botPath = path.join(BOTS_DIR, botId);
 
-        const proc = botProcesses.get(botId);
-        if (proc && proc.stdin && !proc.stdin.destroyed) {
-          proc.stdin.write(text + '\n');
-          addConsoleLog(botId, 'input', text);
-          return;
-        }
-
         addConsoleLog(botId, 'input', `$ ${text}`);
 
         if (text === 'clear') {
@@ -278,29 +269,91 @@ wss.on('connection', (ws) => {
         }
 
         if (text === 'help') {
-          addConsoleLog(botId, 'system', 'Commands: help, clear, ls, cat <file>, npm install, npm install <pkg>, pip install <pkg>, node <file>, python <file>, start, stop');
+          addConsoleLog(botId, 'system', '--- Available Commands ---');
+          addConsoleLog(botId, 'system', '  start           - Start the bot');
+          addConsoleLog(botId, 'system', '  stop            - Stop the bot');
+          addConsoleLog(botId, 'system', '  restart         - Restart the bot');
+          addConsoleLog(botId, 'system', '  install         - Install dependencies (npm install)');
+          addConsoleLog(botId, 'system', '  install <pkg>   - Install a package');
+          addConsoleLog(botId, 'system', '  ls              - List files');
+          addConsoleLog(botId, 'system', '  cat <file>      - View file content');
+          addConsoleLog(botId, 'system', '  node <file>     - Run a node file');
+          addConsoleLog(botId, 'system', '  python <file>   - Run a python file');
+          addConsoleLog(botId, 'system', '  clear           - Clear console');
+          addConsoleLog(botId, 'system', '  npm <cmd>       - Run any npm command');
+          addConsoleLog(botId, 'system', '  pip <cmd>       - Run any pip command');
           return;
         }
 
         if (text === 'start') {
+          const proc = botProcesses.get(botId);
           if (proc) { addConsoleLog(botId, 'error', 'Bot is already running'); return; }
           if (!bot) { addConsoleLog(botId, 'error', 'Bot not found'); return; }
+
+          if (!fs.existsSync(path.join(botPath, 'node_modules'))) {
+            addConsoleLog(botId, 'system', 'Installing dependencies...');
+            const result = await runShell('npm install 2>&1', botPath);
+            addConsoleLog(botId, 'system', 'Dependencies ready');
+          }
+
           const ok = startBotProcess(bot);
           if (!ok) addConsoleLog(botId, 'error', 'Failed to start bot');
           return;
         }
 
         if (text === 'stop') {
+          const proc = botProcesses.get(botId);
           if (!proc) { addConsoleLog(botId, 'error', 'Bot is not running'); return; }
           stopBotProcess(botId);
           addConsoleLog(botId, 'system', 'Bot stopped');
           return;
         }
 
+        if (text === 'restart') {
+          const proc = botProcesses.get(botId);
+          if (proc) stopBotProcess(botId);
+          if (!bot) { addConsoleLog(botId, 'error', 'Bot not found'); return; }
+          setTimeout(() => {
+            if (!fs.existsSync(path.join(botPath, 'node_modules'))) {
+              addConsoleLog(botId, 'system', 'Installing dependencies...');
+              runShell('npm install 2>&1', botPath).then(() => {
+                addConsoleLog(botId, 'system', 'Dependencies ready');
+                startBotProcess(bot);
+              });
+            } else {
+              startBotProcess(bot);
+            }
+          }, 1000);
+          return;
+        }
+
+        if (text === 'install') {
+          addConsoleLog(botId, 'system', 'Running npm install...');
+          const result = await runShell('npm install 2>&1', botPath);
+          if (result.stdout) result.stdout.split('\n').filter(Boolean).slice(-10).forEach(line => addConsoleLog(botId, 'output', line));
+          if (result.stderr) result.stderr.split('\n').filter(Boolean).slice(-10).forEach(line => addConsoleLog(botId, 'error', line));
+          addConsoleLog(botId, 'system', result.code === 0 ? 'Dependencies installed successfully' : `Install failed (exit code: ${result.code})`);
+          return;
+        }
+
+        if (text.startsWith('install ')) {
+          const pkg = text.slice(8).trim();
+          addConsoleLog(botId, 'system', `Installing ${pkg}...`);
+          const result = await runShell(`npm install ${pkg} 2>&1`, botPath);
+          if (result.stdout) result.stdout.split('\n').filter(Boolean).slice(-10).forEach(line => addConsoleLog(botId, 'output', line));
+          if (result.stderr) result.stderr.split('\n').filter(Boolean).slice(-10).forEach(line => addConsoleLog(botId, 'error', line));
+          addConsoleLog(botId, 'system', result.code === 0 ? `${pkg} installed successfully` : `Install failed (exit code: ${result.code})`);
+          return;
+        }
+
         if (text === 'ls' || text === 'dir') {
           if (!fs.existsSync(botPath)) { addConsoleLog(botId, 'error', 'Bot directory not found'); return; }
           const entries = fs.readdirSync(botPath, { withFileTypes: true });
-          const list = entries.map(e => e.isDirectory() ? `[DIR]  ${e.name}` : `       ${e.name}`).join('\n');
+          const list = entries.map(e => {
+            if (e.isDirectory()) return `[DIR]  ${e.name}/`;
+            const size = fs.statSync(path.join(botPath, e.name)).size;
+            return `       ${e.name} (${(size / 1024).toFixed(1)}KB)`;
+          }).join('\n');
           addConsoleLog(botId, 'output', list || 'Empty directory');
           return;
         }
@@ -310,29 +363,39 @@ wss.on('connection', (ws) => {
           const filePath = path.join(botPath, fileName);
           if (!fs.existsSync(filePath)) { addConsoleLog(botId, 'error', `File not found: ${fileName}`); return; }
           const content = fs.readFileSync(filePath, 'utf-8');
-          content.split('\n').forEach(line => addConsoleLog(botId, 'output', line));
+          addConsoleLog(botId, 'output', content);
           return;
         }
 
-        if (text.startsWith('npm ') || text.startsWith('pip ') || text.startsWith('pip3 ') || text.startsWith('yarn ') || text.startsWith('pnpm ')) {
-          addConsoleLog(botId, 'system', `Running: ${text}...`);
-          const result = await runShellCommand(text, botPath);
-          if (result.stdout) result.stdout.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'output', line));
-          if (result.stderr) result.stderr.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'error', line));
-          addConsoleLog(botId, 'system', result.code === 0 ? 'Command completed successfully' : `Command failed (exit code: ${result.code})`);
+        if (text.startsWith('rm ')) {
+          const fileName = text.slice(3).trim();
+          const filePath = path.join(botPath, fileName);
+          if (!fs.existsSync(filePath)) { addConsoleLog(botId, 'error', `File not found: ${fileName}`); return; }
+          fs.rmSync(filePath, { recursive: true, force: true });
+          addConsoleLog(botId, 'system', `Deleted: ${fileName}`);
           return;
         }
 
-        if (text.startsWith('node ') || text.startsWith('python ') || text.startsWith('python3 ')) {
-          addConsoleLog(botId, 'system', `Running: ${text}...`);
-          const result = await runShellCommand(text, botPath);
-          if (result.stdout) result.stdout.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'output', line));
-          if (result.stderr) result.stderr.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'error', line));
+        if (text.startsWith('mkdir ')) {
+          const dirName = text.slice(6).trim();
+          fs.mkdirSync(path.join(botPath, dirName), { recursive: true });
+          addConsoleLog(botId, 'system', `Created directory: ${dirName}`);
+          return;
+        }
+
+        const proc = botProcesses.get(botId);
+        if (proc && proc.stdin && !proc.stdin.destroyed) {
+          proc.stdin.write(text + '\n');
+          return;
+        }
+
+        addConsoleLog(botId, 'system', `Running: ${text}`);
+        const result = await runShell(text + ' 2>&1', botPath);
+        if (result.stdout) result.stdout.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'output', line));
+        if (result.stderr) result.stderr.split('\n').filter(Boolean).forEach(line => addConsoleLog(botId, 'error', line));
+        if (result.stdout && result.stdout.includes('not found')) {
           addConsoleLog(botId, 'system', result.code === 0 ? 'Command completed' : `Command failed (exit code: ${result.code})`);
-          return;
         }
-
-        addConsoleLog(botId, 'error', `Unknown command: ${text}. Type "help" for available commands.`);
       }
     } catch (err) {
       console.error('WebSocket error:', err);
@@ -383,14 +446,22 @@ app.post('/api/upload', (req, res) => {
         botId, req.body.name || req.file.originalname.replace('.zip', ''), language, 'stopped'
       );
 
+      const hasPackageJson = fs.existsSync(path.join(botPath, 'package.json'));
+
       addConsoleLog(botId, 'system', 'Bot uploaded successfully');
       addConsoleLog(botId, 'system', `Language: ${language} | Files: ${flatNames.length}`);
-      if (language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json'))) {
-        addConsoleLog(botId, 'system', 'Installing dependencies...');
-        const result = await runShellCommand('npm install --omit=dev', botPath);
-        if (result.stdout) result.stdout.split('\n').filter(Boolean).slice(-5).forEach(line => addConsoleLog(botId, 'output', line));
-        if (result.stderr) result.stderr.split('\n').filter(Boolean).slice(-5).forEach(line => addConsoleLog(botId, 'error', line));
-        addConsoleLog(botId, 'system', result.code === 0 ? 'Dependencies installed successfully' : 'Dependencies install failed - run "npm install" in console');
+
+      if (language === 'nodejs' && hasPackageJson) {
+        addConsoleLog(botId, 'system', 'Installing npm dependencies...');
+        const result = await runShell('npm install 2>&1', botPath);
+        const lines = (result.stdout + result.stderr).split('\n').filter(Boolean);
+        lines.slice(-5).forEach(line => addConsoleLog(botId, 'output', line));
+
+        if (fs.existsSync(path.join(botPath, 'node_modules'))) {
+          addConsoleLog(botId, 'system', 'Dependencies installed successfully');
+        } else {
+          addConsoleLog(botId, 'error', 'Dependencies install failed. Run "install" in console.');
+        }
       }
 
       res.json({
@@ -454,10 +525,15 @@ app.post('/api/bots/:id/start', async (req, res) => {
   if (botProcesses.has(bot.id)) return res.status(400).json({ error: 'Bot is already running' });
 
   const botPath = path.join(BOTS_DIR, bot.id);
+
   if (bot.language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json')) && !fs.existsSync(path.join(botPath, 'node_modules'))) {
     addConsoleLog(bot.id, 'system', 'node_modules not found. Installing dependencies...');
-    await runShellCommand('npm install --omit=dev', botPath);
-    addConsoleLog(bot.id, 'system', 'Dependencies ready');
+    await runShell('npm install 2>&1', botPath);
+    if (fs.existsSync(path.join(botPath, 'node_modules'))) {
+      addConsoleLog(bot.id, 'system', 'Dependencies installed');
+    } else {
+      addConsoleLog(bot.id, 'error', 'Failed to install dependencies');
+    }
   }
 
   const success = startBotProcess(bot);
@@ -472,10 +548,17 @@ app.post('/api/bots/:id/stop', (req, res) => {
   res.json({ status: 'stopped' });
 });
 
-app.post('/api/bots/:id/restart', (req, res) => {
+app.post('/api/bots/:id/restart', async (req, res) => {
   const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(req.params.id);
   if (!bot) return res.status(404).json({ error: 'Bot not found' });
   stopBotProcess(bot.id);
+
+  const botPath = path.join(BOTS_DIR, bot.id);
+  if (bot.language === 'nodejs' && fs.existsSync(path.join(botPath, 'package.json')) && !fs.existsSync(path.join(botPath, 'node_modules'))) {
+    addConsoleLog(bot.id, 'system', 'Installing dependencies...');
+    await runShell('npm install 2>&1', botPath);
+  }
+
   setTimeout(() => {
     const success = startBotProcess(bot);
     if (success) res.json({ status: 'running' });
