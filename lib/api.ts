@@ -1,119 +1,75 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const WS = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
 let ws: WebSocket | null = null;
-let wsListeners: Map<string, Set<(data: any) => void>> = new Map();
-let wsReconnectTimer: any = null;
-let wsReconnectAttempts = 0;
+const listeners = new Map<string, Set<(d: any) => void>>();
+let wsAttempts = 0;
 
-export function connectWebSocket() {
-  if (ws && ws.readyState === WebSocket.OPEN) return ws;
-  try {
-    ws = new WebSocket(WS_URL);
-  } catch { return null; }
-  ws.onopen = () => { wsReconnectAttempts = 0; };
-  ws.onmessage = (event) => {
+export function connectWS() {
+  if (ws?.readyState === WebSocket.OPEN) return;
+  try { ws = new WebSocket(WS); } catch { return; }
+  ws.onopen = () => { wsAttempts = 0; };
+  ws.onmessage = e => {
     try {
-      const msg = JSON.parse(event.data);
-      if (msg.type && wsListeners.has(msg.type)) {
-        wsListeners.get(msg.type)!.forEach(fn => fn(msg));
-      }
-      if (msg.botId && wsListeners.has(`bot:${msg.botId}`)) {
-        wsListeners.get(`bot:${msg.botId}`)!.forEach(fn => fn(msg));
-      }
+      const m = JSON.parse(e.data);
+      const key = m.botId ? `bot:${m.botId}` : m.type;
+      listeners.get(key)?.forEach(f => f(m));
+      listeners.get('*')?.forEach(f => f(m));
     } catch {}
   };
   ws.onclose = () => {
-    const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
-    wsReconnectAttempts++;
-    wsReconnectTimer = setTimeout(connectWebSocket, delay);
+    if (wsAttempts < 10) setTimeout(connectWS, Math.min(1000 * Math.pow(2, wsAttempts++), 15000));
   };
-  ws.onerror = () => { ws?.close(); };
-  return ws;
+  ws.onerror = () => ws?.close();
 }
 
-export function subscribeBot(botId: string, callback: (data: any) => void) {
-  if (!wsListeners.has(`bot:${botId}`)) wsListeners.set(`bot:${botId}`, new Set());
-  wsListeners.get(`bot:${botId}`)!.add(callback);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'subscribe', botId }));
-  }
-  return () => {
-    wsListeners.get(`bot:${botId}`)?.delete(callback);
-  };
+export function onMsg(botId: string | null, cb: (d: any) => void) {
+  const key = botId ? `bot:${botId}` : '*';
+  if (!listeners.has(key)) listeners.set(key, new Set());
+  listeners.get(key)!.add(cb);
+  if (ws?.readyState === WebSocket.OPEN && botId) ws.send(JSON.stringify({ type: 'sub', botId }));
+  return () => { const s = listeners.get(key); if (s) s.delete(cb); };
 }
 
-export function sendConsoleInput(botId: string, text: string) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'input', botId, text }));
-  }
+export function sendCmd(botId: string, text: string) {
+  ws?.send(JSON.stringify({ type: 'cmd', botId, text }));
 }
 
-async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<any> {
-  let lastErr: any;
+async function req(path: string, opts?: RequestInit, retries = 2): Promise<any> {
+  let last: any;
   for (let i = 0; i <= retries; i++) {
     try {
-      const opts: RequestInit = { method: 'GET' };
-      if (options) {
-        if (options.method) opts.method = options.method;
-        if (options.body) opts.body = options.body;
-        if (options.headers) {
-          opts.headers = {};
-          const h = options.headers as Record<string, string>;
-          Object.keys(h).forEach(k => { (opts.headers as Record<string, string>)[k] = h[k]; });
-        }
-      }
-      const res = await fetch(`${API_URL}${path}`, opts);
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
+      const o: RequestInit = {};
+      if (opts?.method) o.method = opts.method;
+      if (opts?.body) o.body = opts.body;
+      if (opts?.headers) o.headers = opts.headers;
+      const r = await fetch(`${API}${path}`, o);
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
         let msg: string;
-        try { const j = JSON.parse(body); msg = j.error || j.message || body; } catch { msg = body || `HTTP ${res.status}`; }
+        try { const j = JSON.parse(body); msg = j.error || j.message || body; } catch { msg = body || `Error ${r.status}`; }
         throw new Error(msg);
       }
-      return res.json();
-    } catch (err: any) {
-      lastErr = err;
+      return r.json();
+    } catch (e: any) {
+      last = e;
       if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     }
   }
-  throw lastErr || new Error('Request failed');
+  throw last || new Error('Request failed');
 }
 
-export async function uploadBot(file: File, name: string) {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('name', name);
-  return apiFetch('/api/upload', { method: 'POST', body: formData }, 1);
-}
+export const uploadBot = (file: File, name: string) => {
+  const fd = new FormData();
+  fd.append('file', file); fd.append('name', name);
+  return req('/api/upload', { method: 'POST', body: fd }, 1);
+};
 
-export async function fetchBots() {
-  return apiFetch('/api/bots');
-}
-
-export async function fetchBot(id: string) {
-  return apiFetch(`/api/bots/${id}`);
-}
-
-export async function startBot(id: string) {
-  return apiFetch(`/api/bots/${id}/start`, { method: 'POST' });
-}
-
-export async function stopBot(id: string) {
-  return apiFetch(`/api/bots/${id}/stop`, { method: 'POST' });
-}
-
-export async function restartBot(id: string) {
-  return apiFetch(`/api/bots/${id}/restart`, { method: 'POST' });
-}
-
-export async function saveFile(botId: string, filePath: string, content: string) {
-  return apiFetch(`/api/bots/${botId}/files`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filePath, content }),
-  });
-}
-
-export async function deleteBot(id: string) {
-  return apiFetch(`/api/bots/${id}`, { method: 'DELETE' });
-}
+export const fetchBots = () => req('/api/bots');
+export const fetchBot = (id: string) => req(`/api/bots/${id}`);
+export const startBot = (id: string) => req(`/api/bots/${id}/start`, { method: 'POST' });
+export const stopBot = (id: string) => req(`/api/bots/${id}/stop`, { method: 'POST' });
+export const restartBot = (id: string) => req(`/api/bots/${id}/restart`, { method: 'POST' });
+export const saveFile = (botId: string, filePath: string, content: string) =>
+  req(`/api/bots/${botId}/files`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filePath, content }) });
+export const deleteBot = (id: string) => req(`/api/bots/${id}`, { method: 'DELETE' });

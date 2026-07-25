@@ -1,56 +1,41 @@
 'use client';
-
 import { useState, useEffect } from 'react';
 import { AppProvider } from '@/lib/context';
 import Navbar from '@/components/Navbar';
-import LandingPage from '@/components/LandingPage';
+import Landing from '@/components/LandingPage';
 import Dashboard from '@/components/Dashboard';
 import Footer from '@/components/Footer';
 import { Bot } from '@/lib/data';
-import { fetchBots, connectWebSocket } from '@/lib/api';
+import { fetchBots, connectWS } from '@/lib/api';
 
-function AppContent() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+function Content() {
+  const [loggedIn, setLoggedIn] = useState(false);
   const [bots, setBots] = useState<Bot[]>([]);
 
   useEffect(() => {
-    const savedLogin = localStorage.getItem('fp9-logged-in');
-    const savedUser = localStorage.getItem('fp9-user');
-    if (savedLogin === 'true' && savedUser) {
-      setIsLoggedIn(true);
-    }
+    if (localStorage.getItem('fp9-logged-in') === 'true' && localStorage.getItem('fp9-user')) setLoggedIn(true);
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) {
-      connectWebSocket();
-      fetchBots()
-        .then(data => setBots(data))
-        .catch(() => setBots([]));
-    }
-  }, [isLoggedIn]);
+    if (!loggedIn) return;
+    connectWS();
+    fetchBots().then(setBots).catch(() => setBots([]));
+  }, [loggedIn]);
 
-  const handleLogin = () => {
+  const doLogin = () => {
     window.location.href = `https://discord.com/api/oauth2/authorize?client_id=1530409781045493882&redirect_uri=${encodeURIComponent('https://fp9.netlify.app/callback')}&response_type=code&scope=identify%20email`;
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setBots([]);
-    localStorage.removeItem('fp9-logged-in');
-    localStorage.removeItem('fp9-discord-token');
-    localStorage.removeItem('fp9-user');
+  const doLogout = () => {
+    setLoggedIn(false); setBots([]);
+    ['fp9-logged-in', 'fp9-discord-token', 'fp9-user'].forEach(k => localStorage.removeItem(k));
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Navbar isLoggedIn={isLoggedIn} onLogout={handleLogout} />
+      <Navbar loggedIn={loggedIn} onLogout={doLogout} />
       <main className="flex-1">
-        {isLoggedIn ? (
-          <Dashboard bots={bots} setBots={setBots} />
-        ) : (
-          <LandingPage onLogin={handleLogin} />
-        )}
+        {loggedIn ? <Dashboard bots={bots} setBots={setBots} /> : <Landing onLogin={doLogin} />}
       </main>
       <Footer />
     </div>
@@ -58,9 +43,5 @@ function AppContent() {
 }
 
 export default function Home() {
-  return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
-  );
+  return <AppProvider><Content /></AppProvider>;
 }

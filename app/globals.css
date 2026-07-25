@@ -2,128 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 255, 255, 255;
-  --background-end-rgb: 255, 255, 255;
-}
-
-.dark {
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 10, 10, 15;
-  --background-end-rgb: 15, 15, 25;
-}
-
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
-  font-family: 'Inter', sans-serif;
-}
-
-@layer base {
-  * {
-    border-color: theme('colors.gray.200');
-  }
-  .dark * {
-    border-color: theme('colors.gray.700');
-  }
-  body {
-    @apply bg-white dark:bg-gray-950 text-gray-900 dark:text-gray-100;
-  }
-}
+body { font-family: 'Inter', sans-serif; }
 
 @layer components {
-  .btn-primary {
-    @apply bg-discord-blurple hover:bg-discord-blurple/90 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center gap-2;
-  }
-  
-  .btn-secondary {
-    @apply bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center gap-2;
-  }
-  
-  .btn-danger {
-    @apply bg-discord-red hover:bg-discord-red/90 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center gap-2;
-  }
-  
-  .btn-success {
-    @apply bg-discord-green hover:bg-discord-green/90 text-black font-semibold py-2 px-4 rounded-lg transition-all duration-200 flex items-center gap-2;
-  }
-  
-  .card {
-    @apply bg-white dark:bg-gray-800/50 backdrop-blur-sm border border-gray-200 dark:border-gray-700/50 rounded-xl p-6 shadow-lg;
-  }
-  
-  .input-field {
-    @apply w-full bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 text-gray-900 dark:text-white focus:ring-2 focus:ring-discord-blurple focus:border-transparent outline-none transition-all duration-200;
-  }
-  
-  .status-badge {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
-  }
-  
-  .status-running {
-    @apply bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400;
-  }
-  
-  .status-stopped {
-    @apply bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400;
-  }
-  
-  .status-starting {
-    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400;
-  }
+  .btn { @apply inline-flex items-center gap-2 font-semibold py-2 px-4 rounded-lg transition-all duration-200; }
+  .btn-primary { @apply btn bg-discord-blurple hover:bg-discord-blurple/90 text-white; }
+  .btn-secondary { @apply btn bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-white; }
+  .btn-danger { @apply btn bg-red-600 hover:bg-red-700 text-white; }
+  .btn-success { @apply btn bg-green-500 hover:bg-green-600 text-black; }
+  .card { @apply bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/50 rounded-xl p-5 shadow-lg backdrop-blur-sm; }
+  .input { @apply w-full bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-discord-blurple transition-all; }
+  .badge { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium; }
+  .badge-green { @apply badge bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400; }
+  .badge-red { @apply badge bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400; }
+  .badge-yellow { @apply badge bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400; }
 }
 
-.glow {
-  box-shadow: 0 0 40px rgba(88, 101, 242, 0.3);
-}
+.scroll-thin::-webkit-scrollbar { width: 5px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
 
-.gradient-text {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-discord-blurple to-purple-500;
-}
+@keyframes ping { 75%, to { transform: scale(2); opacity: 0; } }
+.animate-ping { animation: ping 1s cubic-bezier(0, 0, .2, 1) infinite; }
 
-.animate-float {
-  animation: float 6s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-20px); }
-}
-
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 3px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
-}
-
-.animate-fadeIn {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.text-balance {
-  text-wrap: balance;
-}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.animate-in { animation: fadeIn .25s ease-out; }
