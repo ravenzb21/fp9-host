@@ -250,14 +250,20 @@ function broadcastStatus(botId, status) {
 function readBotFiles(botPath) {
   if (!fs.existsSync(botPath)) return [];
   const result = [];
-  function walk(dir, prefix) {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const visited = new Set();
+  const MAX_DEPTH = 30;
+  function walk(dir, prefix, depth) {
+    if (depth > MAX_DEPTH) return [];
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
+      const full = path.resolve(path.join(dir, entry.name));
       const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink() || entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if (visited.has(full)) continue;
+      visited.add(full);
       if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === '.git') continue;
-        result.push({ name: entry.name, path: rel, content: '', isDirectory: true, children: walk(full, rel) });
+        result.push({ name: entry.name, path: rel, content: '', isDirectory: true, children: walk(full, rel, depth + 1) });
       } else {
         let content = '';
         try {
@@ -269,7 +275,7 @@ function readBotFiles(botPath) {
     }
     return result;
   }
-  return walk(botPath, '');
+  return walk(botPath, '', 0);
 }
 
 function verifyModule(botPath, modName) {
@@ -323,8 +329,9 @@ app.post('/api/upload', (req, res) => {
       }
       const files = readBotFiles(botPath);
       const flatFiles = [];
-      function flatten(f) { f.forEach(x => { if (x.isDirectory) flatten(x.children || []); else flatFiles.push(x.path); }); }
-      flatten(files);
+      try {
+        (function countFiles(f, d) { if (d > 30) return; for (const x of f) { if (x.isDirectory) countFiles(x.children || [], d + 1); else flatFiles.push(x.path); } })(files, 0);
+      } catch {} finally {}
       res.json({
         bot: {
           id: botId, name: botName, language, status: 'stopped',
