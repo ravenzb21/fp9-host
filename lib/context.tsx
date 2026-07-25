@@ -55,6 +55,8 @@ const translations = {
     
     // Languages
     'languages.title': 'Supported Languages',
+    'languages.discord.js': 'Discord.js',
+    'languages.telegram': 'Telegram',
     'languages.nodejs': 'Node.js',
     'languages.python': 'Python',
     'languages.java': 'Java',
@@ -154,6 +156,8 @@ const translations = {
     
     // Languages
     'languages.title': 'اللغات المدعومة',
+    'languages.discord.js': 'Discord.js',
+    'languages.telegram': 'تيليغرام',
     'languages.nodejs': 'Node.js',
     'languages.python': 'Python',
     'languages.java': 'Java',
