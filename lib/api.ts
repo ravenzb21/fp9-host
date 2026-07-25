@@ -50,22 +50,33 @@ export function sendConsoleInput(botId: string, text: string) {
 }
 
 async function apiFetch(path: string, options?: RequestInit, retries = 2): Promise<any> {
+  let lastErr: any;
   for (let i = 0; i <= retries; i++) {
     try {
-      const res = await fetch(`${API_URL}${path}`, {
-        ...options,
-        headers: { ...options?.headers },
-      });
+      const opts: RequestInit = { method: 'GET' };
+      if (options) {
+        if (options.method) opts.method = options.method;
+        if (options.body) opts.body = options.body;
+        if (options.headers) {
+          opts.headers = {};
+          const h = options.headers as Record<string, string>;
+          Object.keys(h).forEach(k => { (opts.headers as Record<string, string>)[k] = h[k]; });
+        }
+      }
+      const res = await fetch(`${API_URL}${path}`, opts);
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(err.error || `Request failed (${res.status})`);
+        const body = await res.text().catch(() => '');
+        let msg: string;
+        try { const j = JSON.parse(body); msg = j.error || j.message || body; } catch { msg = body || `HTTP ${res.status}`; }
+        throw new Error(msg);
       }
       return res.json();
     } catch (err: any) {
-      if (i === retries) throw err;
-      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+      lastErr = err;
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
     }
   }
+  throw lastErr || new Error('Request failed');
 }
 
 export async function uploadBot(file: File, name: string) {

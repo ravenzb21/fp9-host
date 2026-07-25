@@ -448,19 +448,29 @@ app.post('/api/bots/:id/restart', async (req, res) => {
 });
 
 app.put('/api/bots/:id/files', (req, res) => {
-  const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(req.params.id);
-  if (!bot) return res.status(404).json({ error: 'Bot not found' });
-  const filePath = req.body.filePath;
-  if (!filePath) return res.status(400).json({ error: 'No file path' });
-  const fullPath = path.resolve(path.join(getBotPath(bot.id), filePath));
-  if (!fullPath.startsWith(path.resolve(getBotPath(bot.id)))) return res.status(400).json({ error: 'Invalid path' });
-  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-  fs.writeFileSync(fullPath, req.body.content || '', 'utf-8');
-  db.prepare('UPDATE bots SET updated_at = datetime("now") WHERE id = ?').run(bot.id);
-  if (req.body.content && path.basename(filePath) === 'package.json') {
-    db.prepare('UPDATE bots SET deps_hash = NULL WHERE id = ?').run(bot.id);
+  try {
+    const bot = db.prepare('SELECT * FROM bots WHERE id = ?').get(req.params.id);
+    if (!bot) return res.status(404).json({ error: 'Bot not found' });
+    const filePath = req.body.filePath;
+    if (!filePath || typeof filePath !== 'string') return res.status(400).json({ error: 'No file path provided' });
+    const botPath = path.resolve(getBotPath(bot.id));
+    const safePath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const fullPath = path.resolve(path.join(botPath, safePath));
+    if (!fullPath.startsWith(botPath + path.sep) && fullPath !== botPath) {
+      return res.status(400).json({ error: 'Invalid file path' });
+    }
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fullPath, String(req.body.content || ''), 'utf-8');
+    db.prepare('UPDATE bots SET updated_at = datetime("now") WHERE id = ?').run(bot.id);
+    if (req.body.content && path.basename(filePath) === 'package.json') {
+      db.prepare('UPDATE bots SET deps_hash = NULL WHERE id = ?').run(bot.id);
+    }
+    res.json({ success: true, path: safePath });
+  } catch (err) {
+    console.error('Save error:', err);
+    res.status(500).json({ error: err.message || 'Failed to save file' });
   }
-  res.json({ success: true });
 });
 
 app.delete('/api/bots/:id', (req, res) => {

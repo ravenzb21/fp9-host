@@ -84,6 +84,7 @@ export default function BotDetail({ bot, onBack, onUpdate }: { bot: Bot; onBack:
   const handleSaveFile = async () => {
     if (!selectedFile) return;
     setSaving(true);
+    setStatusMsg('');
     try {
       await saveFile(bot.id, selectedFile.path, editingFile);
       const update = (f: BotFile[]): BotFile[] => f.map(x => {
@@ -94,7 +95,9 @@ export default function BotDetail({ bot, onBack, onUpdate }: { bot: Bot; onBack:
       onUpdate({ ...bot, files: update(bot.files) });
       setStatusMsg('File saved');
       setTimeout(() => setStatusMsg(''), 2000);
-    } catch { setStatusMsg('Save failed'); }
+    } catch (err: any) {
+      setStatusMsg(`Save failed: ${err.message || 'Unknown error'}`);
+    }
     setSaving(false);
   };
 
